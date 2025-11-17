@@ -1,0 +1,19 @@
+services:
+  derper:
+    image: ghcr.io/haukuen/derper:latest
+    container_name: derper
+    restart: unless-stopped
+    ports:
+      - "40007:40007/tcp"
+      - "40008:40008/udp"
+    volumes:
+      - ./derper-certs:/var/lib/derper
+    environment:
+      - DERP_HOSTNAME=<your_server_public_ip>
+      # optional  if you want to modify the port
+      # - DERP_PORT=40007
+      # - STUN_PORT=40008
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
