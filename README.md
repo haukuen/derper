@@ -45,35 +45,40 @@ derper:   {"Name":"custom","RegionID":900,"HostName":"YOUR_SERVER_PUBLIC_IP","Ce
 
 ### 2. 编辑 ACL 配置
 
-在 ACL JSON 配置中添加 `derpMap` 部分：
+在 ACL JSON 配置中添加 `derpMap` 部分。以下是一个完整的配置示例：
+
+**配置说明：**
+- `OmitDefaultRegions`: 设置为 `true` 将禁用所有 Tailscale 官方中继（可选）
+- `RegionID`: 自定义区域 ID，官方建议从 900 到 999 之间选择
+- `RegionCode`: 自定义名称，会显示在 netcheck 中
+- `HostName`: 你的中继服务器公网 IP 地址
+- `CertName`: 粘贴上一步获取的证书名称
 
 ```json
 {
   "derpMap": {
-    // 设置为 true 将禁用所有 Tailscale 官方中继
-    // "OmitDefaultRegions": true,
+    "OmitDefaultRegions": true,
     "Regions": {
-      // 900 是自定义区域 ID，官方建议从 900 到 999 之间选择
       "900": {
         "RegionID": 900,
-        "RegionCode": "my-derp-1",      // 自定义名称，会显示在 netcheck 中
+        "RegionCode": "my-derp-1",
         "RegionName": "My First DERP",
         "Nodes": [
           {
             "Name": "my-node-1",
             "RegionID": 900,
-            "HostName": "YOUR_SERVER_PUBLIC_IP",    // 中继服务器 IP
+            "HostName": "YOUR_SERVER_PUBLIC_IP",
             "DERPPort": 40007,
             "STUNPort": 40008,
-            "CertName": "sha256-raw:f829..."        // 粘贴上一步获取的 CertName
+            "CertName": "sha256-raw:f829..."
           }
         ]
       }
-      // 如需部署多个地区的中继，可添加 "901": { ... } 等配置
     }
   }
 }
 ```
+如需部署多个地区的中继，可添加 "901": { ... } 等配置
 
 ### 3. 保存配置
 
