@@ -20,6 +20,11 @@ while [ ! -S /var/run/tailscale/tailscaled.sock ]; do
 done
 echo "tailscaled socket is ready."
 
+if [ -n "$TS_AUTHKEY" ]; then
+    echo "Authenticating tailscaled..."
+    tailscale up --authkey="$TS_AUTHKEY" --hostname="$DERP_HOSTNAME-derp"
+fi
+
 echo "Starting DERP server, hostname: $DERP_HOSTNAME..."
 exec derper \
     --hostname="$DERP_HOSTNAME" \
