@@ -10,17 +10,31 @@
 curl -O https://raw.githubusercontent.com/haukuen/derper/main/docker-compose.yaml
 ```
 
-### 2. 修改配置
+### 2. 获取 Tailscale Auth Key
 
-编辑 `docker-compose.yaml` 文件，将 `DERP_HOSTNAME` 设置为你的服务器公网 IP 地址。
+为了让 DERP 服务器能够验证连接客户端的合法性，它本身必须登录到你的 Tailscale 网络。
 
-### 3. 启动服务
+1. 登录 [Tailscale 管理控制台 - Keys 页面](https://login.tailscale.com/admin/settings/keys)。
+2. 点击 "Generate auth key"。
+3. 建议设置：
+    - **Reusable**: 勾选（防止容器重建后 Key 失效）
+    - **Ephemeral**: 不勾选
+    - **Tags**: 可选（例如 `tag:derper`，方便 ACL 管理）。
+4. 复制生成的 `tskey-auth-xxxxxx` 开头的 Auth Key。
+
+
+### 3. 修改配置
+
+编辑 `docker-compose.yaml` 文件，填入 **公网 IP** 和上一步获取的 **Auth Key**。
+
+
+### 4. 启动服务
 
 ```bash
 docker-compose up -d
 ```
 
-### 4. 获取 CertName
+### 5. 获取 CertName
 
 查看容器日志获取证书名称：
 
@@ -92,7 +106,10 @@ derper:   {"Name":"custom","RegionID":900,"HostName":"YOUR_SERVER_PUBLIC_IP","Ce
 tailscale netcheck
 ```
 
-在输出的 DERP 延迟部分，你应该能看到刚刚添加的自定义中继节点。
+预期结果：
+
+1. DERP latency 输出中应该包含你自定义的 Region。
+2. 该节点的延迟应该显示具体数值，而不是空白或错误。
 
 ## 注意事项
 
