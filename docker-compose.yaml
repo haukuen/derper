@@ -8,6 +8,7 @@ services:
       - "40008:40008/udp"
     volumes:
       - ./derper-certs:/var/lib/derper
+      - ./tailscale-state:/var/lib/tailscale-derper-state
     environment:
       - DERP_HOSTNAME=<your_server_public_ip>
       - TS_AUTHKEY=tskey-auth-xxxxx
