@@ -1,19 +1,27 @@
+ARG TS_VERSION=stable
+
+FROM tailscale/tailscale:${TS_VERSION} AS tailscale-source
+
 FROM golang:1.25-alpine AS builder
+
+ARG TS_VERSION
 
 RUN apk add --no-cache build-base
 
 WORKDIR /src
 
-RUN go install tailscale.com/cmd/derper@latest
+RUN go install tailscale.com/cmd/derper@${TS_VERSION}
 
-RUN go install tailscale.com/cmd/tailscaled@latest
 
 FROM alpine:latest
 
-RUN apk add --no-cache ca-certificates iproute2
+RUN apk add --no-cache ca-certificates iproute2 iptables
 
 COPY --from=builder /go/bin/derper /usr/bin/derper
-COPY --from=builder /go/bin/tailscaled /usr/bin/tailscaled
+
+COPY --from=tailscale/tailscale:stable /usr/local/bin/tailscaled /usr/bin/tailscaled
+COPY --from=tailscale/tailscale:stable /usr/local/bin/tailscale /usr/bin/tailscale
+# -----------------
 
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
