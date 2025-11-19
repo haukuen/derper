@@ -23,7 +23,6 @@ jobs:
       - name: Get latest upstream version
         id: upstream
         run: |
-          # 调用 GitHub API 获取最新 Release
           LATEST_TAG=$(curl -s https://api.github.com/repos/tailscale/tailscale/releases/latest | jq -r .tag_name)
           echo "Latest upstream version: $LATEST_TAG"
           echo "tag=$LATEST_TAG" >> $GITHUB_OUTPUT
