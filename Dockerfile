@@ -21,7 +21,6 @@ COPY --from=builder /go/bin/derper /usr/bin/derper
 
 COPY --from=tailscale/tailscale:stable /usr/local/bin/tailscaled /usr/bin/tailscaled
 COPY --from=tailscale/tailscale:stable /usr/local/bin/tailscale /usr/bin/tailscale
-# -----------------
 
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
