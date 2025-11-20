@@ -66,6 +66,7 @@ jobs:
           file: ./Dockerfile
           push: true
           platforms: linux/amd64,linux/arm64
+          provenance: false
           build-args: |
             TS_VERSION=${{ steps.upstream.outputs.tag }}
           tags: |
