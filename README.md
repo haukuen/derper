@@ -114,3 +114,6 @@ tailscale netcheck
 ## 注意事项
 
 - 确保服务器的 40007/tcp 和 40008/udp 端口已开放。
+
+## 参考
+[Tailscale 配置文档](https://pkg.go.dev/tailscale.com/tailcfg#DERPRegion)
