@@ -3,7 +3,7 @@ name: Build and Push to GHCR
 on:
   workflow_dispatch:
   schedule:
-    - cron: '30 3 * * 2,4,6'
+    - cron: "30 3 * * 2,4,6"
 
 env:
   REGISTRY: ghcr.io
@@ -27,7 +27,6 @@ jobs:
           echo "Latest upstream version: $LATEST_TAG"
           echo "tag=$LATEST_TAG" >> $GITHUB_OUTPUT
 
-
       - name: Log in to the Container registry
         uses: docker/login-action@v3
         with:
@@ -35,13 +34,27 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Check if image exists
+      - name: Check if upstream Tailscale image exists
+        id: upstream_check
+        run: |
+          UPSTREAM_IMAGE="tailscale/tailscale:${{ steps.upstream.outputs.tag }}"
+          echo "Checking for upstream image: $UPSTREAM_IMAGE..."
+
+          if docker manifest inspect "$UPSTREAM_IMAGE" > /dev/null 2>&1; then
+            echo "Upstream image exists! Proceeding..."
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "::notice::Upstream Tailscale image $UPSTREAM_IMAGE not yet available. Skipping build gracefully."
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Check if our image exists
         id: check
-        continue-on-error: true
+        if: steps.upstream_check.outputs.exists == 'true'
         run: |
           FULL_IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.upstream.outputs.tag }}"
           echo "Checking for $FULL_IMAGE..."
-          
+
           if docker manifest inspect "$FULL_IMAGE" > /dev/null 2>&1; then
             echo "Image exists! Skipping build."
             echo "exists=true" >> $GITHUB_OUTPUT
@@ -51,15 +64,15 @@ jobs:
           fi
 
       - name: Set up QEMU
-        if: steps.check.outputs.exists == 'false'
+        if: steps.upstream_check.outputs.exists == 'true' && steps.check.outputs.exists == 'false'
         uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
-        if: steps.check.outputs.exists == 'false'
+        if: steps.upstream_check.outputs.exists == 'true' && steps.check.outputs.exists == 'false'
         uses: docker/setup-buildx-action@v3
 
       - name: Build and push
-        if: steps.check.outputs.exists == 'false'
+        if: steps.upstream_check.outputs.exists == 'true' && steps.check.outputs.exists == 'false'
         uses: docker/build-push-action@v5
         with:
           context: .
