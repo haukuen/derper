@@ -20,11 +20,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Get latest upstream version
+      - name: Get latest upstream image tag
         id: upstream
         run: |
-          LATEST_TAG=$(curl -s https://api.github.com/repos/tailscale/tailscale/releases/latest | jq -r .tag_name)
-          echo "Latest upstream version: $LATEST_TAG"
+          LATEST_TAG=$(curl -s "https://hub.docker.com/v2/namespaces/tailscale/repositories/tailscale/tags?page_size=100" | \
+            jq -r '.results[].name' | \
+            grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | \
+            sort -V | \
+            tail -n 1)
+          echo "Latest upstream image version: $LATEST_TAG"
           echo "tag=$LATEST_TAG" >> $GITHUB_OUTPUT
 
       - name: Log in to the Container registry
@@ -34,23 +38,8 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Check if upstream Tailscale image exists
-        id: upstream_check
-        run: |
-          UPSTREAM_IMAGE="tailscale/tailscale:${{ steps.upstream.outputs.tag }}"
-          echo "Checking for upstream image: $UPSTREAM_IMAGE..."
-
-          if docker manifest inspect "$UPSTREAM_IMAGE" > /dev/null 2>&1; then
-            echo "Upstream image exists! Proceeding..."
-            echo "exists=true" >> $GITHUB_OUTPUT
-          else
-            echo "::notice::Upstream Tailscale image $UPSTREAM_IMAGE not yet available. Skipping build gracefully."
-            echo "exists=false" >> $GITHUB_OUTPUT
-          fi
-
       - name: Check if our image exists
         id: check
-        if: steps.upstream_check.outputs.exists == 'true'
         run: |
           FULL_IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.upstream.outputs.tag }}"
           echo "Checking for $FULL_IMAGE..."
@@ -64,15 +53,15 @@ jobs:
           fi
 
       - name: Set up QEMU
-        if: steps.upstream_check.outputs.exists == 'true' && steps.check.outputs.exists == 'false'
+        if: steps.check.outputs.exists == 'false'
         uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
-        if: steps.upstream_check.outputs.exists == 'true' && steps.check.outputs.exists == 'false'
+        if: steps.check.outputs.exists == 'false'
         uses: docker/setup-buildx-action@v3
 
       - name: Build and push
-        if: steps.upstream_check.outputs.exists == 'true' && steps.check.outputs.exists == 'false'
+        if: steps.check.outputs.exists == 'false'
         uses: docker/build-push-action@v5
         with:
           context: .
