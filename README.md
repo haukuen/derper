@@ -1,5 +1,7 @@
 # Tailscale DERP 中继服务器 Docker 镜像
 
+[English](README.en.md) | 中文
+
 本项目提供了一个 Docker 镜像，用于快速部署可验证客户端的 Tailscale DERP 中继服务器，仅需公网 IP 即可部署。
 
 ## 快速开始
@@ -116,4 +118,5 @@ tailscale netcheck
 - 确保服务器的 40007/tcp 和 40008/udp 端口已开放。
 
 ## 参考
+
 [Tailscale 配置文档](https://pkg.go.dev/tailscale.com/tailcfg#DERPRegion)
