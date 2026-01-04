@@ -15,6 +15,8 @@ services:
       # optional  if you want to modify the port
       # - DERP_PORT=40007
       # - STUN_PORT=40008
+      # optional  if you want to modify the timeout
+      # - TAILSCALED_TIMEOUT=30
     cap_add:
       - NET_ADMIN
     devices:
