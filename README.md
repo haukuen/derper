@@ -27,7 +27,13 @@ curl -O https://raw.githubusercontent.com/haukuen/derper/main/docker-compose.yam
 
 ### 3. 修改配置
 
-编辑 `docker-compose.yaml` 文件，填入 **公网 IP** 和上一步获取的 **Auth Key**。
+编辑 `docker-compose.yaml` 文件，填入 **公网 IP**。
+
+在同级目录创建 `.env` 文件，将上一步获取的 **Auth Key** 写入其中：
+
+```env
+TS_AUTHKEY=tskey-auth-xxxxx
+```
 
 
 ### 4. 启动服务

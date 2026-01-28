@@ -27,7 +27,13 @@ For the DERP server to verify connecting clients, it must be logged into your Ta
 
 ### 3. Modify Configuration
 
-Edit the `docker-compose.yaml` file and fill in your **public IP** and the **Auth Key** obtained in the previous step.
+Edit the `docker-compose.yaml` file and fill in your **public IP**.
+
+Create a `.env` file in the same directory and place the **Auth Key** from the previous step inside:
+
+```env
+TS_AUTHKEY=tskey-auth-xxxxx
+```
 
 
 ### 4. Start Service
