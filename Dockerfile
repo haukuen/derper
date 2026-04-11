@@ -2,7 +2,7 @@ ARG TS_VERSION=stable
 
 FROM tailscale/tailscale:${TS_VERSION} AS tailscale-source
 
-FROM golang:1.25-alpine AS builder
+FROM golang:1.26-alpine AS builder
 
 ARG TS_VERSION
 
