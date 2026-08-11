@@ -1,3 +1,11 @@
+# This project is no longer maintained
+
+Tailscale now officially offers the [Peer Relay](https://tailscale.com/docs/features/peer-relay) feature, where nodes relay traffic for each other directly. Self-hosted DERP relays are no longer necessary in most scenarios.
+
+This project is no longer actively maintained. The code and documentation remain as a historical reference. For new deployments, please use the official Peer Relay feature.
+
+---
+
 # Tailscale DERP Relay Server Docker Image
 
 [中文](README.md) | English

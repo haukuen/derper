@@ -1,3 +1,11 @@
+# 此项目已停止维护
+
+Tailscale 官方现已推出 [Peer Relay(对等中继)](https://tailscale.com/docs/features/peer-relay) 特性,节点之间可直接相互中继流量,自建 DERP 中继在绝大多数场景下已无必要。
+
+本项目不再更新维护,代码与文档保留作为历史参考。新部署建议直接使用官方 Peer Relay 功能。
+
+---
+
 # Tailscale DERP 中继服务器 Docker 镜像
 
 [English](README.en.md) | 中文
