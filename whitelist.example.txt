@@ -1,0 +1,8 @@
+# DERP admission allowlist: one node key per line ('nodekey:' prefix optional)
+# lines starting with # or ; are comments; trailing comments after # or ; are ignored
+# each member gets their node key via `tailscale status --json` (Self.PublicKey); see README
+# edit this file and save - the controller reloads it automatically, no restart needed
+#
+# examples:
+# nodekey:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  # member-a laptop
+# bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb  # member-b phone

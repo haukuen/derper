@@ -2,6 +2,11 @@ name: Build and Push to GHCR
 
 on:
   workflow_dispatch:
+    inputs:
+      test-tag:
+        description: "Build a test image with this suffix instead of the upstream version (e.g. 'beta1' -> tag 'test-beta1'; latest stays untouched)"
+        required: false
+        default: ""
   schedule:
     - cron: "30 3 * * 2,4,6"
 
@@ -10,16 +15,17 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-  check-and-build:
+  check:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      packages: write
-
+      packages: read
+    outputs:
+      tag: ${{ steps.upstream.outputs.tag }}
+      exists: ${{ steps.check.outputs.exists }}
+      final_tags: ${{ steps.final.outputs.final_tags }}
+      inspect_tag: ${{ steps.final.outputs.inspect_tag }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
       - name: Get latest upstream image tag
         id: upstream
         run: |
@@ -31,6 +37,20 @@ jobs:
           echo "Latest upstream image version: $LATEST_TAG"
           echo "tag=$LATEST_TAG" >> $GITHUB_OUTPUT
 
+      - name: Derive final image tags
+        id: final
+        run: |
+          IMG="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
+          if [[ -n "${{ inputs.test-tag }}" ]]; then
+            # Manual test build: only a test-* tag, latest and version tags stay untouched.
+            echo "final_tags=${IMG}:test-${{ inputs.test-tag }}" >> $GITHUB_OUTPUT
+            echo "inspect_tag=${IMG}:test-${{ inputs.test-tag }}" >> $GITHUB_OUTPUT
+          else
+            echo "final_tags=${IMG}:${{ steps.upstream.outputs.tag }}
+          ${IMG}:latest" >> $GITHUB_OUTPUT
+            echo "inspect_tag=${IMG}:${{ steps.upstream.outputs.tag }}" >> $GITHUB_OUTPUT
+          fi
+
       - name: Log in to the Container registry
         uses: docker/login-action@v3
         with:
@@ -40,6 +60,7 @@ jobs:
 
       - name: Check if our image exists
         id: check
+        if: inputs.test-tag == ''
         run: |
           FULL_IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.upstream.outputs.tag }}"
           echo "Checking for $FULL_IMAGE..."
@@ -52,25 +73,97 @@ jobs:
             echo "exists=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: Set up QEMU
-        if: steps.check.outputs.exists == 'false'
-        uses: docker/setup-qemu-action@v3
+  build:
+    needs: check
+    if: needs.check.outputs.exists == 'false' || inputs.test-tag != ''
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-24.04
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Prepare platform pair
+        run: |
+          platform=${{ matrix.platform }}
+          echo "PLATFORM_PAIR=${platform//\//-}" >> $GITHUB_ENV
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Log in to the Container registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up Docker Buildx
-        if: steps.check.outputs.exists == 'false'
         uses: docker/setup-buildx-action@v3
 
-      - name: Build and push
-        if: steps.check.outputs.exists == 'false'
+      - name: Build and push by digest
+        id: build
         uses: docker/build-push-action@v5
         with:
           context: .
           file: ./Dockerfile
-          push: true
-          platforms: linux/amd64,linux/arm64
+          platforms: ${{ matrix.platform }}
           provenance: false
           build-args: |
-            TS_VERSION=${{ steps.upstream.outputs.tag }}
-          tags: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.upstream.outputs.tag }}
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+            TS_VERSION=${{ needs.check.outputs.tag }}
+          outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
+
+      - name: Export digest
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+
+      - name: Upload digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ env.PLATFORM_PAIR }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  merge:
+    needs: [check, build]
+    permissions:
+      contents: read
+      packages: write
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digests-*
+          merge-multiple: true
+
+      - name: Log in to the Container registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Create manifest list and push
+        working-directory: /tmp/digests
+        run: |
+          docker buildx imagetools create \
+            $(printf -- '--tag %s ' $(echo '${{ needs.check.outputs.final_tags }}' | tr '\n' ' ')) \
+            $(printf '${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@sha256:%s ' *)
+
+      - name: Inspect image
+        run: |
+          docker buildx imagetools inspect ${{ needs.check.outputs.inspect_tag }}

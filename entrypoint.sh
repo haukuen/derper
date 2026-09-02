@@ -1,55 +1,66 @@
 #!/bin/sh
-
 set -e
 
+DERP_CERT_DIR="/var/lib/derper"
+mkdir -p "$DERP_CERT_DIR"
+
 if [ -z "$DERP_HOSTNAME" ]; then
-    echo "Error: DERP_HOSTNAME environment variable must be set (your server's public IP)."
+    echo "Error: DERP_HOSTNAME environment variable must be set (public IP or domain)."
     exit 1
 fi
 
-DERP_CERT_DIR="/var/lib/derper"
-TAILSCALED_SOCKET="/var/run/tailscale/tailscaled.sock"
-SOCKET_TIMEOUT="${TAILSCALED_TIMEOUT:-30}"
+ARGS=""
+if [ -n "$DERP_EXTRA_ARGS" ]; then
+    ARGS="$ARGS $DERP_EXTRA_ARGS"
+fi
 
-mkdir -p "$DERP_CERT_DIR"
+if [ -n "$DERP_PORT" ]; then
+    ARGS="$ARGS -a :$DERP_PORT"
+fi
+if [ -n "$STUN_PORT" ]; then
+    ARGS="$ARGS -stun-port $STUN_PORT"
+fi
+if [ "${DERP_STUN:-true}" != "true" ]; then
+    ARGS="$ARGS -stun=false"
+fi
 
-echo "Starting tailscaled in background..."
-tailscaled --socket="$TAILSCALED_SOCKET" --statedir=/var/lib/tailscale-derper-state &
-TAILSCALED_PID=$!
-
-echo "Waiting for tailscaled socket (timeout: ${SOCKET_TIMEOUT}s)..."
-elapsed=0
-while [ ! -S "$TAILSCALED_SOCKET" ]; do
-  if [ $elapsed -ge $SOCKET_TIMEOUT ]; then
-    echo "Error: tailscaled socket not ready after ${SOCKET_TIMEOUT}s"
-    exit 1
-  fi
-  
-  if ! kill -0 $TAILSCALED_PID 2>/dev/null; then
-    echo "Error: tailscaled process died unexpectedly"
-    exit 1
-  fi
-  
-  sleep 1
-  elapsed=$((elapsed + 1))
-done
-echo "tailscaled socket is ready."
-
-if [ -n "$TS_AUTHKEY" ]; then
-    echo "Authenticating tailscaled..."
-    if ! tailscale up --authkey="$TS_AUTHKEY" --hostname="$DERP_HOSTNAME-derp"; then
-        echo "Error: Failed to authenticate with Tailscale"
-        exit 1
+# Certificate mode: manual (self-signed for IP / provided files, default)
+# or letsencrypt (requires a domain and ports 80/443 reachable).
+CERTMODE="${DERP_CERTMODE:-manual}"
+if [ "$CERTMODE" = "letsencrypt" ]; then
+    ARGS="$ARGS -certmode letsencrypt"
+    if [ -n "$ACME_EMAIL" ]; then
+        ARGS="$ARGS -acme-email $ACME_EMAIL"
     fi
-    echo "Successfully authenticated with Tailscale."
+    # Let's Encrypt HTTP-01 needs port 80 for challenges/renewal.
+    ARGS="$ARGS -http-port ${DERP_HTTP_PORT:-80}"
+else
+    ARGS="$ARGS -certmode manual -certdir $DERP_CERT_DIR -http-port ${DERP_HTTP_PORT:--1}"
+fi
+
+# --- admission control ---
+if [ -n "$VERIFY_CLIENT_URL" ]; then
+    # fail-open defaults to true upstream, which silently admits everyone
+    # when the controller is unreachable - force it closed unless explicitly
+    # overridden.
+    ARGS="$ARGS --verify-client-url=$VERIFY_CLIENT_URL --verify-client-url-fail-open=${VERIFY_CLIENT_FAIL_OPEN:-false}"
+
+    # Optional convenience: wait for a controller advertised as host:port.
+    if [ -n "$WAIT_FOR_CONTROLLER" ]; then
+        i=0
+        until wget -q -O /dev/null --timeout=2 "http://$WAIT_FOR_CONTROLLER/healthz" 2>/dev/null; do
+            i=$((i+1))
+            if [ $i -ge "${WAIT_FOR_CONTROLLER_TIMEOUT:-30}" ]; then
+                echo "Warning: admission controller at $WAIT_FOR_CONTROLLER not reachable after ${WAIT_FOR_CONTROLLER_TIMEOUT}s; starting derper anyway (fail-open=${VERIFY_CLIENT_FAIL_OPEN:-false})."
+                break
+            fi
+            sleep 1
+        done
+    fi
+else
+    echo "Warning: VERIFY_CLIENT_URL not set. No admission control - anyone who knows your address can relay through this server."
 fi
 
 echo "Starting DERP server, hostname: $DERP_HOSTNAME..."
-exec derper \
-    --hostname="$DERP_HOSTNAME" \
-    -certmode manual \
-    -certdir "$DERP_CERT_DIR" \
-    -http-port -1 \
-    -a ":$DERP_PORT" \
-    -stun-port "$STUN_PORT" \
-    --verify-clients
+# shellcheck disable=SC2086
+exec derper --hostname="$DERP_HOSTNAME" $ARGS

@@ -1,98 +1,86 @@
-# 此项目已停止维护
-
-Tailscale 官方现已推出 [Peer Relay(对等中继)](https://tailscale.com/docs/features/peer-relay) 特性,节点之间可直接相互中继流量,自建 DERP 中继在绝大多数场景下已无必要。
-
-本项目不再更新维护,代码与文档保留作为历史参考。新部署建议直接使用官方 Peer Relay 功能。
-
----
-
-# Tailscale DERP 中继服务器 Docker 镜像
+# Tailscale 自建 DERP 中继
 
 [English](README.en.md) | 中文
 
-本项目提供了一个 Docker 镜像，用于快速部署可验证客户端的 Tailscale DERP 中继服务器，仅需公网 IP 即可部署。
+> **适用范围**:本项目面向**多个相互独立 tailnet 共用中继**的场景(如与朋友各自持有独立 Tailscale 网络时共享中继带宽)。若仅为单一 tailnet 自用,无需自建 DERP——请直接使用官方 [Peer Relay](https://tailscale.com/docs/features/peer-relay) 功能。
 
-## 快速开始
+本项目提供两个 Docker 镜像,用于搭建可被**多个相互独立 tailnet 共用**的 Tailscale DERP 中继服务。准入控制基于 node key 白名单,由独立的准入控制器集中管理;derper 通过 `--verify-client-url` 协议向其查询每个客户端的接入许可。
 
-### 1. 下载配置文件
+
+## 破坏性变更
+
+- **移除 `TS_AUTHKEY` / `--verify-clients` 模式**:该模式通过本机 tailscaled 的 netmap 验证客户端,仅适用于单一 tailnet,且要求 TUN 设备与 `NET_ADMIN` 权限,与多 tailnet 共享场景不兼容。既有部署请迁移至 `VERIFY_CLIENT_URL`。
+- **准入改为 `--verify-client-url`**:derper 将每个新连接的 node key 提交准入控制器核验。中继服务器不再运行 tailscaled。
+
+## 部署
+
+### 1. 获取配置文件
 
 ```bash
 curl -O https://raw.githubusercontent.com/haukuen/derper/main/docker-compose.yaml
+curl -o whitelist.txt https://raw.githubusercontent.com/haukuen/derper/main/whitelist.example.txt
 ```
 
-### 2. 获取 Tailscale Auth Key
+### 2. 配置白名单
 
-为了让 DERP 服务器能够验证连接客户端的合法性，它本身必须登录到你的 Tailscale 网络。
+在任一节点上执行以下命令,可获取该 tailnet **全部节点**的 node key:
 
-1. 登录 [Tailscale 管理控制台 - Keys 页面](https://login.tailscale.com/admin/settings/keys)。
-2. 点击 "Generate auth key"。
-3. 建议设置：
-    - **Reusable**: 勾选（防止容器重建后 Key 失效）
-    - **Ephemeral**: 不勾选
-    - **Tags**: 可选（例如 `tag:derper`，方便 ACL 管理）。
-4. 复制生成的 `tskey-auth-xxxxxx` 开头的 Auth Key。
-
-
-### 3. 修改配置
-
-编辑 `docker-compose.yaml` 文件，填入 **公网 IP**。
-
-在同级目录创建 `.env` 文件，将上一步获取的 **Auth Key** 写入其中：
-
-```env
-TS_AUTHKEY=tskey-auth-xxxxx
-```
-
-
-### 4. 启动服务
+Linux / macOS:
 
 ```bash
-docker-compose up -d
+tailscale status --json | grep -o 'nodekey:[0-9a-zA-Z]*' | sort -u
 ```
 
-### 5. 获取 CertName
+将 key 逐行写入 `whitelist.txt`:
 
-查看容器日志获取证书名称：
+```
+nodekey:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+nodekey:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+```
+
+
+### 3. 配置服务器地址
+
+编辑 `docker-compose.yaml`,将 `DERP_HOSTNAME` 设置为服务器**公网 IP**(默认使用自签证书)或**域名**(可启用 Let's Encrypt,见[证书配置](#证书配置可选))。
+
+### 4. 启动
+
+```bash
+docker compose up -d
+```
+
+将启动两个容器:`admission-controller`(准入控制器)与 `derper`(中继)。
+
+### 5. 获取证书指纹(公网 IP 场景)
+
+使用公网 IP 时,derper 自动生成自签证书,需将其指纹填入客户端 DERP map:
 
 ```bash
 docker logs derper
 ```
 
-在日志末尾找到类似以下格式的 `CertName` 信息：
+日志中的关键行:
 
 ```
 derper: Using self-signed certificate for IP address "YOUR_SERVER_PUBLIC_IP". Configure it in DERPMap using:
 derper:   {"Name":"custom","RegionID":900,"HostName":"YOUR_SERVER_PUBLIC_IP","CertName":"sha256-raw:f829xxxxxxxxxxxxxx"}
 ```
 
-复制 `sha256-raw:f829...` 这部分内容，后续配置会用到。
+记录 `sha256-raw:...` 的完整值。
 
-## 配置 Tailscale ACL
+## 客户端配置
 
-### 1. 访问管理控制台
-
-登录 [Tailscale 管理控制台](https://login.tailscale.com/admin/acls)。
-
-### 2. 编辑 ACL 配置
-
-在 ACL JSON 配置中添加 `derpMap` 部分。以下是一个完整的配置示例：
-
-**配置说明：**
-- `OmitDefaultRegions`: 设置为 `true` 将禁用所有 Tailscale 官方中继（可选）
-- `RegionID`: 自定义区域 ID，官方建议从 900 到 999 之间选择
-- `RegionCode`: 自定义名称，会显示在 netcheck 中
-- `HostName`: 你的中继服务器公网 IP 地址
-- `CertName`: 粘贴上一步获取的证书名称
+每个 tailnet 的管理员在 [Tailscale 管理后台](https://login.tailscale.com/admin/acls) 的 ACL 中添加相同的 `derpMap`:
 
 ```json
 {
   "derpMap": {
-    "OmitDefaultRegions": true,
+    "OmitDefaultRegions": false,
     "Regions": {
       "900": {
         "RegionID": 900,
         "RegionCode": "my-derp-1",
-        "RegionName": "My First DERP",
+        "RegionName": "My DERP",
         "Nodes": [
           {
             "Name": "my-node-1",
@@ -100,7 +88,8 @@ derper:   {"Name":"custom","RegionID":900,"HostName":"YOUR_SERVER_PUBLIC_IP","Ce
             "HostName": "YOUR_SERVER_PUBLIC_IP",
             "DERPPort": 40007,
             "STUNPort": 40008,
-            "CertName": "sha256-raw:f829..."
+            "CertName": "sha256-raw:f829...",
+            "IPv4": "YOUR_SERVER_PUBLIC_IP"
           }
         ]
       }
@@ -108,29 +97,94 @@ derper:   {"Name":"custom","RegionID":900,"HostName":"YOUR_SERVER_PUBLIC_IP","Ce
   }
 }
 ```
-如需部署多个地区的中继，可添加 "901": { ... } 等配置
 
-### 3. 保存配置
+字段说明:
 
-保存 ACL 配置使更改生效。
+- `RegionID`:自定义,使用 900~999;多台中继各使用不同 Region ID。
+- `DERPPort` / `STUNPort`:与服务端 `DERP_PORT` / `STUN_PORT` 保持一致。
+- `CertName`:仅公网 IP(自签证书)场景需要;域名 + Let's Encrypt 场景省略。
+- `OmitDefaultRegions`:设为 `true` 可禁用官方中继(可选)。客户端经 netcheck 测速后在官方与自建节点间自动选择延迟最低者,不强制独占。
 
-## 验证部署
+## 验证
 
-在任意 Tailscale 设备上执行以下命令验证中继是否正常工作：
+任一已加入 DERP map 的节点上执行:
 
 ```bash
-tailscale netcheck
+tailscale netcheck       # 自定义 Region 应显示具体延迟
 ```
 
-预期结果：
+服务端侧,准入控制器日志(`docker logs admission-controller`)记录每次拒绝:`DENY nodekey=... source=...`。
 
-1. DERP latency 输出中应该包含你自定义的 Region。
-2. 该节点的延迟应该显示具体数值，而不是空白或错误。
+## 成员管理
 
-## 注意事项
+**新增成员**:
 
-- 确保服务器的 40007/tcp 和 40008/udp 端口已开放。
+1. 成员提供 node key(获取方式见[配置白名单](#2-配置白名单))。
+2. 将 key 追加至控制器所在主机的 `whitelist.txt` 并保存,立即生效。
+3. 该成员所在 tailnet 的管理员将全部中继节点加入其 DERP map。
+
+**移除成员**:从 `whitelist.txt` 删除对应 key 并保存。已建立的连接在断开后无法重连。
+
+## 环境变量
+
+### derper
+
+必填:
+
+| 变量 | 说明 |
+|---|---|
+| `DERP_HOSTNAME` | 公网 IP 或域名 |
+| `VERIFY_CLIENT_URL` | 准入控制器地址:`http://admission-controller:8081/verify` |
+
+可选:
+
+| 变量 | 默认值 | 说明 |
+|---|---|---|
+| `VERIFY_CLIENT_FAIL_OPEN` | `false` | 控制器不可达时是否放行新客户端。默认拒绝(fail-closed);上游 derper 默认值为放行,此处强制收敛为拒绝,如需放行需显式设置 `true` |
+| `WAIT_FOR_CONTROLLER` | 空 | `host:port`,derper 启动前等待控制器健康检查通过(compose 网络内使用) |
+| `DERP_PORT` | `40007` | DERP TLS 监听端口 |
+| `STUN_PORT` | `40008` | STUN UDP 监听端口 |
+| `DERP_CERTMODE` | `manual` | `manual`(自签/自带证书)或 `letsencrypt`(需域名) |
+| `ACME_EMAIL` | 空 | letsencrypt 模式下的 ACME 账户邮箱 |
+| `DERP_EXTRA_ARGS` | 空 | 透传给 derper 的额外参数,如 `--rate-config /etc/derper/rate-config.json` |
+
+### admission-controller
+
+可选:
+
+| 变量 | 默认值 | 说明 |
+|---|---|---|
+| `ADMIT_LISTEN` | `:8081` | HTTP 监听地址 |
+| `ADMIT_WHITELIST` | `/etc/derper/whitelist.txt` | 白名单文件路径 |
+
+
+## 证书配置(可选)
+
+具备域名且 80/443 端口可达时,可使用 Let's Encrypt 证书,客户端 DERP map 无需 `CertName`:
+
+```yaml
+  derper:
+    environment:
+      - DERP_HOSTNAME=derp.example.com
+      - DERP_CERTMODE=letsencrypt
+      - ACME_EMAIL=you@example.com
+```
+
+## 多节点部署
+
+- 每台中继服务器运行一个 derper 容器,`VERIFY_CLIENT_URL` 统一指向同一控制器。
+
+
+
+## 特性
+
+- **跨 tailnet 流量隔离**:DERP 仅转发以目标 node key 寻址的 WireGuard 密文;不具备目标 tailnet 会话密钥的第三方无法解密,白名单内成员之间亦然。
+- **在线状态不可见**:连接状态广播(WatchConns)仅对持有 mesh key 的中继间节点开放,客户端无法枚举其他成员。
+- **未授权访问拒绝**:node key 不在白名单的连接被直接拒绝;控制器不可达时按 fail-closed 策略同样拒绝。
+- **带宽治理**:可启用 derper 实验性限速(`DERP_EXTRA_ARGS=--rate-config ...`)约束单个成员的带宽占用。
 
 ## 参考
 
-[Tailscale 配置文档](https://pkg.go.dev/tailscale.com/tailcfg#DERPRegion)
+- [derper 官方 README](https://github.com/tailscale/tailscale/blob/main/cmd/derper/README.md)
+- [Tailscale 自建 DERP 文档](https://tailscale.com/kb/1232/derp-servers)
+- [tailcfg.DERPAdmitClientRequest](https://pkg.go.dev/tailscale.com/tailcfg#DERPAdmitClientRequest)

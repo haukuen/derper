@@ -1,23 +1,24 @@
 services:
+  admission-controller:
+    image: ghcr.io/haukuen/derper-admission-controller:latest
+    container_name: admission-controller
+    restart: unless-stopped
+    volumes:
+      - ./whitelist.txt:/etc/derper/whitelist.txt
+    ports:
+      - "8081:8081"
+
   derper:
     image: ghcr.io/haukuen/derper:latest
     container_name: derper
     restart: unless-stopped
+    environment:
+      - DERP_HOSTNAME=<your_server_public_ip>
+      - VERIFY_CLIENT_URL=http://admission-controller:8081/verify
     ports:
       - "40007:40007/tcp"
       - "40008:40008/udp"
     volumes:
       - ./derper-certs:/var/lib/derper
-      - ./tailscale-state:/var/lib/tailscale-derper-state
-    environment:
-      - DERP_HOSTNAME=<your_server_public_ip>
-      - TS_AUTHKEY=${TS_AUTHKEY}
-      # optional  if you want to modify the port
-      # - DERP_PORT=40007
-      # - STUN_PORT=40008
-      # optional  if you want to modify the timeout
-      # - TAILSCALED_TIMEOUT=30
-    cap_add:
-      - NET_ADMIN
-    devices:
-      - /dev/net/tun:/dev/net/tun
+    depends_on:
+      - admission-controller
