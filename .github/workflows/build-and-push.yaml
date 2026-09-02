@@ -43,12 +43,17 @@ jobs:
           IMG="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
           if [[ -n "${{ inputs.test-tag }}" ]]; then
             # Manual test build: only a test-* tag, latest and version tags stay untouched.
-            echo "final_tags=${IMG}:test-${{ inputs.test-tag }}" >> $GITHUB_OUTPUT
-            echo "inspect_tag=${IMG}:test-${{ inputs.test-tag }}" >> $GITHUB_OUTPUT
+            echo "final_tags=${IMG}:test-${{ inputs.test-tag }}" >> "$GITHUB_OUTPUT"
+            echo "inspect_tag=${IMG}:test-${{ inputs.test-tag }}" >> "$GITHUB_OUTPUT"
           else
-            echo "final_tags=${IMG}:${{ steps.upstream.outputs.tag }}
-          ${IMG}:latest" >> $GITHUB_OUTPUT
-            echo "inspect_tag=${IMG}:${{ steps.upstream.outputs.tag }}" >> $GITHUB_OUTPUT
+            # Multiline output values must use the heredoc-delimiter form.
+            {
+              echo "final_tags<<EOF"
+              echo "${IMG}:${{ steps.upstream.outputs.tag }}"
+              echo "${IMG}:latest"
+              echo "EOF"
+            } >> "$GITHUB_OUTPUT"
+            echo "inspect_tag=${IMG}:${{ steps.upstream.outputs.tag }}" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Log in to the Container registry
