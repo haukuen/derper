@@ -23,6 +23,7 @@ type whitelist struct {
 	size    int64
 	path    string
 	syncs   map[string]*syncStatus
+	statErr string
 }
 
 // syncStatus tracks the health of one sync source so that a failing sync
@@ -43,8 +44,10 @@ func newWhitelist(path string) *whitelist {
 func (w *whitelist) loadIfChanged() {
 	st, err := os.Stat(w.path)
 	if err != nil {
+		w.noteUnreadable(err)
 		return
 	}
+	w.noteReadable()
 	w.mu.RLock()
 	unchanged := st.ModTime().Equal(w.mod) && st.Size() == w.size
 	w.mu.RUnlock()
@@ -73,6 +76,33 @@ func (w *whitelist) loadIfChanged() {
 	w.mod, w.size = st.ModTime(), st.Size()
 	w.mu.Unlock()
 	log.Printf("whitelist loaded: %d manual key(s)", len(keys))
+}
+
+// noteUnreadable warns when the whitelist file cannot be stat'ed (missing
+// file, wrong bind mount). Warnings are deduplicated so a persistent
+// condition does not flood the log; the in-memory list keeps serving and
+// unknown keys stay fail-closed.
+func (w *whitelist) noteUnreadable(err error) {
+	msg := err.Error()
+	w.mu.Lock()
+	prev := w.statErr
+	w.statErr = msg
+	w.mu.Unlock()
+	if msg != prev {
+		log.Printf("whitelist file %s unreadable, keeping current in-memory entries until it returns: %v", w.path, err)
+	}
+}
+
+// noteReadable logs the recovery after a period of unreadability, so
+// operators notice when the file (or its mount) came back.
+func (w *whitelist) noteReadable() {
+	w.mu.Lock()
+	prev := w.statErr
+	w.statErr = ""
+	w.mu.Unlock()
+	if prev != "" {
+		log.Printf("whitelist file %s readable again", w.path)
+	}
 }
 
 // parseWhitelist parses the file format: one key per line, whole-line
