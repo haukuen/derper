@@ -21,9 +21,22 @@ curl -O https://raw.githubusercontent.com/haukuen/derper/main/docker-compose.yam
 curl -o whitelist.txt https://raw.githubusercontent.com/haukuen/derper/main/whitelist.example.txt
 ```
 
-### 2. 配置白名单
+### 2. 配置白名单(两种方式选其一)
 
-在任一节点上执行以下命令,可获取该 tailnet **全部节点**的 node key:
+**方式 A:Tailscale API 自动同步(推荐)**——成员 tailnet 创建一个只读 OAuth client,控制器定时拉取其设备列表,自动维护该 tailnet 全部设备的 node key:新设备自动进名单,设备移出 tailnet 自动撤销。配置后通常无需再手动维护 `whitelist.txt`。
+
+在 [Tailscale 管理后台](https://console.tailscale.com/admin/settings/trust-credentials) 生成 OAuth client(client ID + client secret),勾选只读权限 **`devices:core:read`**,然后写入 `docker-compose.yaml`:
+
+```yaml
+  admission-controller:
+    environment:
+      - TS_SYNC_CLIENTS=k1234567890abcdef:tskey-client-xxxx,k2345:tskey-client-yyyy
+      - TS_SYNC_INTERVAL=5m   # 可选,默认 5 分钟
+```
+
+> **凭证安全**:只接受 OAuth client。**不要使用全权限 API access token**——那种 key 拥有整个 tailnet 的控制权(改 ACL、删设备、签发密钥),绝不应交给第三方服务器。多个成员 tailnet 用逗号分隔,各自生成一个 client。
+
+**方式 B:手动维护**——在任一节点上执行以下命令,获取该 tailnet **全部节点**的 node key:
 
 Linux / macOS:
 
@@ -38,6 +51,7 @@ nodekey:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 nodekey:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
 ```
 
+编辑保存即时生效,无需重启。两种方式可并存,放行名单取并集。
 
 ### 3. 配置服务器地址
 
@@ -70,7 +84,7 @@ derper:   {"Name":"custom","RegionID":900,"HostName":"YOUR_SERVER_PUBLIC_IP","Ce
 
 ## 客户端配置
 
-每个 tailnet 的管理员在 [Tailscale 管理后台](https://login.tailscale.com/admin/acls) 的 ACL 中添加相同的 `derpMap`:
+每个 tailnet 的管理员在 [Tailscale 管理后台](https://console.tailscale.com/admin/acls/file) 的 ACL 中添加相同的 `derpMap`:
 
 ```json
 {
@@ -119,11 +133,19 @@ tailscale netcheck       # 自定义 Region 应显示具体延迟
 
 **新增成员**:
 
-1. 成员提供 node key(获取方式见[配置白名单](#2-配置白名单))。
-2. 将 key 追加至控制器所在主机的 `whitelist.txt` 并保存,立即生效。
+1. 方式 A(同步):成员 tailnet 管理员生成一个 `devices:core:read` 只读 OAuth client 提供给你,追加到 `TS_SYNC_CLIENTS`,该 tailnet 全部设备自动进名单。
+2. 方式 B(手动):成员提供 node key(获取方式见[配置白名单](#2-配置白名单方式两种选其一)),追加至 `whitelist.txt` 并保存。
 3. 该成员所在 tailnet 的管理员将全部中继节点加入其 DERP map。
 
-**移除成员**:从 `whitelist.txt` 删除对应 key 并保存。已建立的连接在断开后无法重连。
+**移除成员**:方式 A 将对应 client 从 `TS_SYNC_CLIENTS` 移除并重建控制器(或直接将设备移出其 tailnet);方式 B 从 `whitelist.txt` 删除对应 key 并保存。已建立的连接在断开后无法重连。
+
+## Tailscale API 自动同步
+
+部署时的推荐配置(见[配置白名单](#2-配置白名单方式两种选其一)方式 A),此处补充行为细节:
+
+- 同步结果仅存内存,不写入 `whitelist.txt`;手动名单与同步名单取并集。控制器重启后需等首轮同步完成(约数秒),期间 fail-closed,客户端会自动重试,无感知。
+- 某个来源同步失败时**保留上一次名单**并记录错误(`GET /status` 可见),不会因 API 故障放行陌生人,也不会误清空名单。
+- 成员吊销凭证后同步停止,已同步名单保持不变,可随时改用手动方式维护。
 
 ## 环境变量
 
@@ -156,6 +178,8 @@ tailscale netcheck       # 自定义 Region 应显示具体延迟
 |---|---|---|
 | `ADMIT_LISTEN` | `:8081` | HTTP 监听地址 |
 | `ADMIT_WHITELIST` | `/etc/derper/whitelist.txt` | 白名单文件路径 |
+| `TS_SYNC_CLIENTS` | 空 | Tailscale 自动同步的 OAuth client 列表,`clientID:clientSecret`,逗号分隔;需 `devices:core:read` 只读权限 |
+| `TS_SYNC_INTERVAL` | `5m` | 同步轮询间隔 |
 
 
 ## 证书配置(可选)

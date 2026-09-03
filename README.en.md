@@ -21,9 +21,22 @@ curl -O https://raw.githubusercontent.com/haukuen/derper/main/docker-compose.yam
 curl -o whitelist.txt https://raw.githubusercontent.com/haukuen/derper/main/whitelist.example.txt
 ```
 
-### 2. Populate the allowlist
+### 2. Populate the allowlist (pick one of the two methods)
 
-Run the following on any node to obtain the node keys of **every device in that tailnet**:
+**Method A: Tailscale API auto-sync (recommended)** — each member tailnet creates a read-only OAuth client and the controller periodically pulls its device list, maintaining that tailnet's node keys automatically: new devices join the allowlist on their own, devices removed from the tailnet are revoked automatically. Once configured, `whitelist.txt` usually no longer needs manual maintenance.
+
+Generate an OAuth client (client ID + client secret) in the [Tailscale admin console](https://console.tailscale.com/admin/settings/trust-credentials) with the read-only **`devices:core:read`** scope, then add it to `docker-compose.yaml`:
+
+```yaml
+  admission-controller:
+    environment:
+      - TS_SYNC_CLIENTS=k1234567890abcdef:tskey-client-xxxx,k2345:tskey-client-yyyy
+      - TS_SYNC_INTERVAL=5m   # optional, default 5 minutes
+```
+
+> **Credential safety**: only OAuth clients are accepted. **Never use a fully-permitted API access token** — such a key controls the entire tailnet (ACL edits, device removal, key issuance) and must not be given to a third-party server. Comma-separate multiple member tailnets, one client each.
+
+**Method B: manual maintenance** — run the following on any node to obtain the node keys of **every device in that tailnet**:
 
 Linux / macOS:
 
@@ -38,6 +51,7 @@ nodekey:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 nodekey:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
 ```
 
+Edits take effect immediately on save, no restart needed. Both methods can coexist; the allowlist is their union.
 
 ### 3. Set the server address
 
@@ -70,7 +84,7 @@ Record the full `sha256-raw:...` value.
 
 ## Client configuration
 
-Each tailnet's administrator adds the same `derpMap` to their ACL:
+Each tailnet's administrator adds the same `derpMap` in the [Tailscale admin console](https://console.tailscale.com/admin/acls/file):
 
 ```json
 {
@@ -119,11 +133,19 @@ Server side, the admission controller log (`docker logs admission-controller`) r
 
 **Add a member**:
 
-1. The member provides their node key (see [Populate the allowlist](#2-populate-the-allowlist)).
-2. Append the key to `whitelist.txt` on the controller host and save; effective immediately.
+1. Method A (sync): the member's tailnet admin generates a read-only OAuth client with `devices:core:read` and hands it to you; append it to `TS_SYNC_CLIENTS` and that tailnet's devices join the allowlist automatically.
+2. Method B (manual): the member provides their node key (see [Populate the allowlist](#2-populate-the-allowlist-pick-one-of-the-two-methods)); append it to `whitelist.txt` and save.
 3. The administrator of that member's tailnet adds all relay nodes to its DERP map.
 
-**Remove a member**: delete the key from `whitelist.txt` and save. Established connections cannot reconnect after they drop.
+**Remove a member**: Method A — drop the client from `TS_SYNC_CLIENTS` and recreate the controller (or simply remove the device from their tailnet); Method B — delete the key from `whitelist.txt` and save. Established connections cannot reconnect after they drop.
+
+## Tailscale API auto-sync
+
+The recommended setup from deployment (see [Populate the allowlist](#2-populate-the-allowlist-pick-one-of-the-two-methods), method A); behavior details:
+
+- Synced lists live in memory only and are never written to `whitelist.txt`; manual and synced keys are merged (union). After a controller restart the first sync round takes a few seconds; until then the fail-closed policy applies and clients retry automatically, unnoticed.
+- When one source's sync fails, its **previous list stays in force** and the error is recorded (visible via `GET /status`) — an API outage neither admits strangers nor wipes the list.
+- If a member revokes their credential, syncing stops for that tailnet and the last synced list remains; switching to manual management is seamless.
 
 ## Environment variables
 
@@ -156,6 +178,8 @@ Optional:
 |---|---|---|
 | `ADMIT_LISTEN` | `:8081` | HTTP listen address |
 | `ADMIT_WHITELIST` | `/etc/derper/whitelist.txt` | Allowlist file path |
+| `TS_SYNC_CLIENTS` | empty | OAuth clients for Tailscale auto-sync, `clientID:clientSecret`, comma-separated; requires the `devices:core:read` read-only scope |
+| `TS_SYNC_INTERVAL` | `5m` | Sync polling interval |
 
 
 ## Certificates (optional)

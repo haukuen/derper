@@ -7,6 +7,8 @@ services:
       - ./whitelist.txt:/etc/derper/whitelist.txt
     ports:
       - "8081:8081"
+    environment:
+      # - TS_SYNC_CLIENTS=k1234567890abcdef:tskey-client-xxxx
 
   derper:
     image: ghcr.io/haukuen/derper:latest
