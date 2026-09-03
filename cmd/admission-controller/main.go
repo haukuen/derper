@@ -53,11 +53,59 @@ func main() {
 	// Optional Tailscale device sync; nil when unconfigured.
 	syncClients := startSyncLoop(ctx, wl, os.Getenv("TS_SYNC_CLIENTS"), syncInterval())
 
-	// Admission is derper's protocol only: POST on /verify (or /verify/,
-	// in case the configured URL carries a trailing slash). Anything else
-	// 404s so the controller does not answer admission probes on every
-	// path it exposes.
-	admit := func(rw http.ResponseWriter, r *http.Request) {
+	mux := newMux(wl, syncClients)
+
+	srv := &http.Server{
+		Addr:              *listen,
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       10 * time.Second,
+		WriteTimeout:      10 * time.Second,
+	}
+	// Graceful shutdown on SIGTERM/SIGINT: stop accepting, let in-flight
+	// admission responses (and docker stop) drain within the timeout.
+	go func() {
+		<-ctx.Done()
+		log.Printf("shutting down")
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := srv.Shutdown(shutdownCtx); err != nil {
+			log.Printf("shutdown: %v", err)
+		}
+	}()
+	log.Printf("admission controller %s listening on %s, whitelist %s", version, *listen, *whitelistPath)
+	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		log.Fatal(err)
+	}
+}
+
+// newMux builds the HTTP API: admission on /verify (and /verify/, in case
+// the configured URL carries a trailing slash), plus health and status
+// endpoints. Anything else 404s so the controller does not answer
+// admission probes on every path it exposes.
+func newMux(wl *whitelist, syncClients map[string]*tsClient) *http.ServeMux {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/verify", handleAdmit(wl))
+	mux.HandleFunc("/verify/", handleAdmit(wl))
+	mux.HandleFunc("/healthz", func(rw http.ResponseWriter, r *http.Request) {
+		fmt.Fprintln(rw, "ok")
+	})
+	mux.HandleFunc("/status", func(rw http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(rw, "version: %s\n", version)
+		fmt.Fprint(rw, wl.statusLine())
+		if syncClients != nil {
+			for id := range syncClients {
+				fmt.Fprintf(rw, "sync client %s configured\n", id)
+			}
+		}
+	})
+	return mux
+}
+
+// handleAdmit answers derper's admission protocol. Admission is derper's
+// protocol only: POST with a JSON body, JSON reply.
+func handleAdmit(wl *whitelist) http.HandlerFunc {
+	return func(rw http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(rw, "POST required", http.StatusMethodNotAllowed)
 			return
@@ -82,45 +130,6 @@ func main() {
 		}
 		rw.Header().Set("Content-Type", "application/json")
 		rw.Write([]byte(fmt.Sprintf(`{"Allow":%t}`, allow)))
-	}
-
-	mux := http.NewServeMux()
-	mux.HandleFunc("/verify", admit)
-	mux.HandleFunc("/verify/", admit)
-	mux.HandleFunc("/healthz", func(rw http.ResponseWriter, r *http.Request) {
-		fmt.Fprintln(rw, "ok")
-	})
-	mux.HandleFunc("/status", func(rw http.ResponseWriter, r *http.Request) {
-		fmt.Fprintf(rw, "version: %s\n", version)
-		fmt.Fprint(rw, wl.statusLine())
-		if syncClients != nil {
-			for id := range syncClients {
-				fmt.Fprintf(rw, "sync client %s configured\n", id)
-			}
-		}
-	})
-
-	srv := &http.Server{
-		Addr:              *listen,
-		Handler:           mux,
-		ReadHeaderTimeout: 5 * time.Second,
-		ReadTimeout:       10 * time.Second,
-		WriteTimeout:      10 * time.Second,
-	}
-	// Graceful shutdown on SIGTERM/SIGINT: stop accepting, let in-flight
-	// admission responses (and docker stop) drain within the timeout.
-	go func() {
-		<-ctx.Done()
-		log.Printf("shutting down")
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if err := srv.Shutdown(shutdownCtx); err != nil {
-			log.Printf("shutdown: %v", err)
-		}
-	}()
-	log.Printf("admission controller %s listening on %s, whitelist %s", version, *listen, *whitelistPath)
-	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		log.Fatal(err)
 	}
 }
 

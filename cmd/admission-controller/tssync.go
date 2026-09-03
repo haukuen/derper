@@ -23,7 +23,9 @@ import (
 // Only the standard library is used, keeping with the no-tailscale-
 // dependency rule of this binary.
 
-const (
+// Variables rather than consts so tests can point them at a local
+// httptest server.
+var (
 	tsTokenURL     = "https://controlplane.tailscale.com/api/v2/oauth/token"
 	tsDevicesURL   = "https://controlplane.tailscale.com/api/v2/tailnet/-/devices"
 	tsTokenRefresh = 5 * time.Minute // re-mint access tokens this long before expiry
