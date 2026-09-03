@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -184,24 +185,31 @@ func (c *tsClient) devices() ([]string, error) {
 	return keys, nil
 }
 
-// runSync executes one round for every configured client; failures keep
+// runSync executes one round for every configured client in parallel, so
+// a slow or unreachable tailnet cannot delay the others; failures keep
 // the previous list and are only recorded.
 func runSync(wl *whitelist, clients map[string]*tsClient) {
+	var wg sync.WaitGroup
 	for id, c := range clients {
-		keys, err := c.devices()
-		if err != nil {
-			wl.recordSyncError(c.sourceName(), err)
-			continue
-		}
-		wl.replaceForSource(c.sourceName(), keys)
-		log.Printf("synced tailnet via client %s: %d device(s)", id, len(keys))
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			keys, err := c.devices()
+			if err != nil {
+				wl.recordSyncError(c.sourceName(), err)
+				return
+			}
+			wl.replaceForSource(c.sourceName(), keys)
+			log.Printf("synced tailnet via client %s: %d device(s)", id, len(keys))
+		}()
 	}
+	wg.Wait()
 }
 
 // startSyncLoop validates config, runs one round immediately and keeps
-// polling. It returns the clients for status reporting, or nil when no
-// sync is configured.
-func startSyncLoop(wl *whitelist, spec string, interval time.Duration) map[string]*tsClient {
+// polling until ctx is cancelled. It returns the clients for status
+// reporting, or nil when no sync is configured.
+func startSyncLoop(ctx context.Context, wl *whitelist, spec string, interval time.Duration) map[string]*tsClient {
 	clients := parseTSSyncClients(spec)
 	if len(clients) == 0 {
 		return nil
@@ -210,8 +218,13 @@ func startSyncLoop(wl *whitelist, spec string, interval time.Duration) map[strin
 		runSync(wl, clients)
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
-		for range ticker.C {
-			runSync(wl, clients)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				runSync(wl, clients)
+			}
 		}
 	}()
 	return clients

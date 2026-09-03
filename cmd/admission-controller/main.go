@@ -11,14 +11,18 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -36,11 +40,14 @@ type admitRequest struct {
 
 func main() {
 	flag.Parse()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
 	wl := newWhitelist(*whitelistPath)
 	wl.loadIfChanged()
 
 	// Optional Tailscale device sync; nil when unconfigured.
-	syncClients := startSyncLoop(wl, os.Getenv("TS_SYNC_CLIENTS"), syncInterval())
+	syncClients := startSyncLoop(ctx, wl, os.Getenv("TS_SYNC_CLIENTS"), syncInterval())
 
 	// Admission is derper's protocol only: POST on /verify (or /verify/,
 	// in case the configured URL carries a trailing slash). Anything else
@@ -95,8 +102,21 @@ func main() {
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      10 * time.Second,
 	}
+	// Graceful shutdown on SIGTERM/SIGINT: stop accepting, let in-flight
+	// admission responses (and docker stop) drain within the timeout.
+	go func() {
+		<-ctx.Done()
+		log.Printf("shutting down")
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := srv.Shutdown(shutdownCtx); err != nil {
+			log.Printf("shutdown: %v", err)
+		}
+	}()
 	log.Printf("admission controller listening on %s, whitelist %s", *listen, *whitelistPath)
-	log.Fatal(srv.ListenAndServe())
+	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		log.Fatal(err)
+	}
 }
 
 // envOr returns the environment variable's value or a fallback, so the
