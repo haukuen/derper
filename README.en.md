@@ -82,6 +82,8 @@ derper:   {"Name":"custom","RegionID":900,"HostName":"YOUR_SERVER_PUBLIC_IP","Ce
 
 Record the full `sha256-raw:...` value.
 
+> **Upgrade note**: if an existing deployment used the `./derper-certs` bind mount, certificate storage has moved to a named volume. A fresh self-signed certificate is generated on first start and the `CertName` fingerprint changes — re-extract it from the logs and update every tailnet's DERP map.
+
 ## Client configuration
 
 Each tailnet's administrator adds the same `derpMap` in the [Tailscale admin console](https://console.tailscale.com/admin/acls/file):
@@ -127,7 +129,7 @@ From any node whose tailnet has the DERP map applied:
 tailscale netcheck       # the custom Region should report a concrete latency
 ```
 
-Server side, the admission controller log (`docker logs admission-controller`) records every rejection: `DENY nodekey=... source=...`.
+Server side, the admission controller log (`docker logs admission-controller`) records every rejection: `DENY nodekey=... source=...`; the first admission of each key since startup is also logged as `ALLOW ... (first admission since start)` for auditing.
 
 ## Member management
 
@@ -146,6 +148,12 @@ The recommended setup from deployment (see [Populate the allowlist](#2-populate-
 - Synced lists live in memory only and are never written to `whitelist.txt`; manual and synced keys are merged (union). After a controller restart the first sync round takes a few seconds; until then the fail-closed policy applies and clients retry automatically, unnoticed.
 - When one source's sync fails, its **previous list stays in force** and the error is recorded (visible via `GET /status`) — an API outage neither admits strangers nor wipes the list.
 - If a member revokes their credential, syncing stops for that tailnet and the last synced list remains; switching to manual management is seamless.
+
+## Known limitations
+
+- **Admission is checked only at connection setup**: derper queries the admission controller once when a client opens a new connection. After a key is revoked, the device's **established connections persist until they drop naturally**; reconnects are rejected.
+- **Re-authentication rotates the node key**: when a device re-authenticates, its node key changes. Method A (sync) follows automatically and invisibly; with method B (manual) the member must submit the new key and update `whitelist.txt`, or be rejected.
+- **The admission endpoint is unauthenticated**: `/verify` is plain HTTP with no authentication and belongs on a private/compose network reachable by derper only — never publish it to the internet. `docker-compose.yaml` already binds 8081 to the host loopback only (`curl 127.0.0.1:8081/status` shows the running version and per-source health).
 
 ## Environment variables
 

@@ -82,6 +82,8 @@ derper:   {"Name":"custom","RegionID":900,"HostName":"YOUR_SERVER_PUBLIC_IP","Ce
 
 记录 `sha256-raw:...` 的完整值。
 
+> **升级提示**:如果旧部署使用 `./derper-certs` bind mount,新版本的证书存储改为 named volume,首次启动会重新生成自签证书,`CertName` 指纹随之变化——需重新从日志提取并更新各 tailnet 的 derpMap。
+
 ## 客户端配置
 
 每个 tailnet 的管理员在 [Tailscale 管理后台](https://console.tailscale.com/admin/acls/file) 的 ACL 中添加相同的 `derpMap`:
@@ -127,7 +129,7 @@ derper:   {"Name":"custom","RegionID":900,"HostName":"YOUR_SERVER_PUBLIC_IP","Ce
 tailscale netcheck       # 自定义 Region 应显示具体延迟
 ```
 
-服务端侧,准入控制器日志(`docker logs admission-controller`)记录每次拒绝:`DENY nodekey=... source=...`。
+服务端侧,准入控制器日志(`docker logs admission-controller`)记录每次拒绝:`DENY nodekey=... source=...`;每个 key 首次放行时也会记录一条 `ALLOW ... (first admission since start)`,便于审计。
 
 ## 成员管理
 
@@ -146,6 +148,12 @@ tailscale netcheck       # 自定义 Region 应显示具体延迟
 - 同步结果仅存内存,不写入 `whitelist.txt`;手动名单与同步名单取并集。控制器重启后需等首轮同步完成(约数秒),期间 fail-closed,客户端会自动重试,无感知。
 - 某个来源同步失败时**保留上一次名单**并记录错误(`GET /status` 可见),不会因 API 故障放行陌生人,也不会误清空名单。
 - 成员吊销凭证后同步停止,已同步名单保持不变,可随时改用手动方式维护。
+
+## 已知限制
+
+- **准入仅在建连时核验**:derper 只在客户端建立新连接时查询一次准入控制器。吊销某个 key 后,该设备**已建立的连接会持续到自然断开**,不会被立即踢出;其重连会被拒绝。
+- **重新登录会更换 node key**:设备重新认证后 node key 随之变化。方式 A(同步)自动跟进,无感知;方式 B(手动)需要成员重新提交新 key 并更新 `whitelist.txt`,否则会被拒绝。
+- **准入接口无鉴权**:`/verify` 是明文 HTTP 且不带鉴权,只应部署在 derper 可达的私网/compose 网络内,切勿发布到公网。`docker-compose.yaml` 已默认将 8081 仅绑定到宿主机回环地址(`curl 127.0.0.1:8081/status` 可查看运行版本与各来源健康状态)。
 
 ## 环境变量
 
