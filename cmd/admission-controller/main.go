@@ -26,6 +26,10 @@ import (
 	"time"
 )
 
+// version is stamped at build time via -ldflags "-X main.version=...";
+// dev is what you get from plain `go build`.
+var version = "dev"
+
 var (
 	listen        = flag.String("listen", envOr("ADMIT_LISTEN", ":8081"), "listen address for the admission controller HTTP API")
 	whitelistPath = flag.String("whitelist", envOr("ADMIT_WHITELIST", "/etc/derper/whitelist.txt"), "path to the node key whitelist file")
@@ -87,6 +91,7 @@ func main() {
 		fmt.Fprintln(rw, "ok")
 	})
 	mux.HandleFunc("/status", func(rw http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(rw, "version: %s\n", version)
 		fmt.Fprint(rw, wl.statusLine())
 		if syncClients != nil {
 			for id := range syncClients {
@@ -113,7 +118,7 @@ func main() {
 			log.Printf("shutdown: %v", err)
 		}
 	}()
-	log.Printf("admission controller listening on %s, whitelist %s", *listen, *whitelistPath)
+	log.Printf("admission controller %s listening on %s, whitelist %s", version, *listen, *whitelistPath)
 	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Fatal(err)
 	}

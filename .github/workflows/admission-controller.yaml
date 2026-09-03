@@ -29,6 +29,7 @@ jobs:
       - name: Derive image tags
         id: tags
         run: |
+          VERSION="dev"
           TAGS="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest"
           if [[ "$GITHUB_REF" == refs/tags/controller-v* ]]; then
             VERSION="${GITHUB_REF#refs/tags/controller-v}"
@@ -36,6 +37,7 @@ jobs:
           $TAGS"
           elif [[ -n "${{ inputs.tag }}" ]]; then
             # Manual test build: only the requested tag, latest stays untouched.
+            VERSION="${{ inputs.tag }}"
             TAGS="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ inputs.tag }}"
           fi
           {
@@ -43,6 +45,7 @@ jobs:
             echo "$TAGS"
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Log in to the Container registry
         uses: docker/login-action@v3
@@ -62,4 +65,6 @@ jobs:
           push: true
           platforms: linux/amd64,linux/arm64
           provenance: false
+          build-args: |
+            VERSION=${{ steps.tags.outputs.version }}
           tags: ${{ steps.tags.outputs.tags }}

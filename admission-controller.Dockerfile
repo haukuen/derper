@@ -2,9 +2,11 @@ FROM golang:1.27-alpine AS builder
 
 WORKDIR /src
 
+ARG VERSION=dev
+
 COPY go.mod ./
 COPY cmd ./cmd
-RUN CGO_ENABLED=0 go build -o /out/admission-controller ./cmd/admission-controller
+RUN CGO_ENABLED=0 go build -ldflags "-X main.version=${VERSION}" -o /out/admission-controller ./cmd/admission-controller
 
 FROM alpine:latest
 
