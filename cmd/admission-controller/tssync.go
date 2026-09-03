@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"net/url"
@@ -77,6 +78,18 @@ func (c *tsClient) sourceName() string {
 	return "ts:" + prefix
 }
 
+// respErr turns a non-2xx response into an error that carries a truncated
+// response body, so upstream API or proxy error messages end up in the
+// logs and in /status instead of just a bare status code.
+func respErr(resp *http.Response) error {
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+	resp.Body.Close()
+	if s := strings.TrimSpace(string(body)); s != "" {
+		return fmt.Errorf("%s: %s", resp.Status, s)
+	}
+	return fmt.Errorf("%s", resp.Status)
+}
+
 // token returns a valid access token, minting a fresh one via the OAuth
 // client credentials flow when needed. Tokens live ~1h; we refresh a bit
 // early. An error here must never clear the synced list - callers keep
@@ -100,17 +113,18 @@ func (c *tsClient) token() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("oauth token request: %s", resp.Status)
+		return "", respErr(resp)
 	}
 	var tok struct {
 		AccessToken string `json:"access_token"`
 		ExpiresIn   int    `json:"expires_in"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&tok); err != nil {
+		resp.Body.Close()
 		return "", err
 	}
+	resp.Body.Close()
 	if tok.AccessToken == "" {
 		return "", fmt.Errorf("oauth token response missing access_token")
 	}
@@ -144,6 +158,9 @@ func (c *tsClient) devices() ([]string, error) {
 		if err != nil {
 			return nil, err
 		}
+		if resp.StatusCode != http.StatusOK {
+			return nil, respErr(resp)
+		}
 		var page struct {
 			Devices    []tsDevice `json:"devices"`
 			NextCursor string     `json:"nextCursor"`
@@ -152,9 +169,6 @@ func (c *tsClient) devices() ([]string, error) {
 		resp.Body.Close()
 		if err != nil {
 			return nil, err
-		}
-		if resp.StatusCode != http.StatusOK {
-			return nil, fmt.Errorf("list devices: %s", resp.Status)
 		}
 		for _, d := range page.Devices {
 			if d.NodeKey == "" {
