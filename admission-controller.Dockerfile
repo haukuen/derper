@@ -8,9 +8,13 @@ COPY go.mod ./
 COPY cmd ./cmd
 RUN CGO_ENABLED=0 go build -ldflags "-X main.version=${VERSION}" -o /out/admission-controller ./cmd/admission-controller
 
-FROM alpine:latest
+FROM alpine:3.24
 
-RUN mkdir -p /etc/derper
+# Non-root: the controller only reads the whitelist bind mount and
+# listens on 8081.
+RUN addgroup -S admission \
+    && adduser -S -G admission admission \
+    && mkdir -p /etc/derper
 
 COPY --from=builder /out/admission-controller /usr/bin/admission-controller
 
@@ -18,5 +22,7 @@ EXPOSE 8081/tcp
 
 ENV ADMIT_LISTEN=:8081 \
     ADMIT_WHITELIST=/etc/derper/whitelist.txt
+
+USER admission
 
 ENTRYPOINT ["/usr/bin/admission-controller"]
