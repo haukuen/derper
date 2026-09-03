@@ -42,7 +42,15 @@ func main() {
 	// Optional Tailscale device sync; nil when unconfigured.
 	syncClients := startSyncLoop(wl, os.Getenv("TS_SYNC_CLIENTS"), syncInterval())
 
+	// Admission is derper's protocol only: POST on /verify (or /verify/,
+	// in case the configured URL carries a trailing slash). Anything else
+	// 404s so the controller does not answer admission probes on every
+	// path it exposes.
 	admit := func(rw http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(rw, "POST required", http.StatusMethodNotAllowed)
+			return
+		}
 		var req admitRequest
 		body, err := io.ReadAll(io.LimitReader(r.Body, 8<<10))
 		if err != nil {
@@ -54,9 +62,12 @@ func main() {
 			return
 		}
 		key := normalizeKey(req.NodePublic)
-		allow := wl.allowed(key)
-		if !allow {
+		allow, first := wl.allowed(key)
+		switch {
+		case !allow:
 			log.Printf("DENY nodekey=%s source=%s", shortKey(key), req.Source)
+		case first:
+			log.Printf("ALLOW nodekey=%s source=%s (first admission since start)", shortKey(key), req.Source)
 		}
 		rw.Header().Set("Content-Type", "application/json")
 		rw.Write([]byte(fmt.Sprintf(`{"Allow":%t}`, allow)))
@@ -65,7 +76,6 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/verify", admit)
 	mux.HandleFunc("/verify/", admit)
-	mux.HandleFunc("/", admit)
 	mux.HandleFunc("/healthz", func(rw http.ResponseWriter, r *http.Request) {
 		fmt.Fprintln(rw, "ok")
 	})

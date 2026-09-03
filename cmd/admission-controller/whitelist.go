@@ -23,6 +23,7 @@ type whitelist struct {
 	size    int64
 	path    string
 	syncs   map[string]*syncStatus
+	seen    map[string]bool
 	statErr string
 }
 
@@ -36,7 +37,7 @@ type syncStatus struct {
 }
 
 func newWhitelist(path string) *whitelist {
-	return &whitelist{sources: map[string]string{}, path: path, syncs: map[string]*syncStatus{}}
+	return &whitelist{sources: map[string]string{}, path: path, syncs: map[string]*syncStatus{}, seen: map[string]bool{}}
 }
 
 // loadIfChanged re-reads the whitelist file if it changed on disk. Only
@@ -162,13 +163,19 @@ func (w *whitelist) recordSyncError(source string, err error) {
 	log.Printf("sync %s failed, keeping previous list: %v", source, err)
 }
 
-// allowed reports whether the key is allowlisted by any source.
-func (w *whitelist) allowed(key string) bool {
+// allowed reports whether the key is allowlisted by any source, and
+// whether this is the first admission for it since process start (used
+// for an ALLOW log line; seen keys are bounded by the list size).
+func (w *whitelist) allowed(key string) (bool, bool) {
 	w.loadIfChanged()
-	w.mu.RLock()
-	defer w.mu.RUnlock()
-	_, ok := w.sources[key]
-	return ok
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if _, ok := w.sources[key]; !ok {
+		return false, false
+	}
+	first := !w.seen[key]
+	w.seen[key] = true
+	return true, first
 }
 
 // statusLine renders the /status body: total, manual and per-source counts.
