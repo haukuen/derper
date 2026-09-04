@@ -5,10 +5,6 @@ services:
     restart: unless-stopped
     volumes:
       - ./whitelist.txt:/etc/derper/whitelist.txt
-    # Loopback only: derper reaches the controller over the compose
-    # network, and /verify is an unauthenticated allowlist oracle - never
-    # publish 8081 to the public internet. The loopback binding keeps
-    # `curl 127.0.0.1:8081/status` working on the host for debugging.
     ports:
       - "127.0.0.1:8081:8081"
     healthcheck:
@@ -31,9 +27,6 @@ services:
       - "40007:40007/tcp"
       - "40008:40008/udp"
     volumes:
-      # Named volume (not a host bind mount): the container runs as a
-      # non-root user and needs to write self-signed certs here on first
-      # start, which a host-owned bind directory would not allow.
       - derper-certs:/var/lib/derper
     depends_on:
       admission-controller:

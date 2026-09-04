@@ -18,7 +18,7 @@
 
 ```bash
 curl -O https://raw.githubusercontent.com/haukuen/derper/main/docker-compose.yaml
-curl -o whitelist.txt https://raw.githubusercontent.com/haukuen/derper/main/whitelist.example.txt
+touch whitelist.txt   # 白名单文件需预先存在,否则首次启动会被 Docker 当作目录挂载
 ```
 
 ### 2. 配置白名单(两种方式选其一)
@@ -149,11 +149,6 @@ tailscale netcheck       # 自定义 Region 应显示具体延迟
 - 某个来源同步失败时**保留上一次名单**并记录错误(`GET /status` 可见),不会因 API 故障放行陌生人,也不会误清空名单。
 - 成员吊销凭证后同步停止,已同步名单保持不变,可随时改用手动方式维护。
 
-## 已知限制
-
-- **准入仅在建连时核验**:derper 只在客户端建立新连接时查询一次准入控制器。吊销某个 key 后,该设备**已建立的连接会持续到自然断开**,不会被立即踢出;其重连会被拒绝。
-- **重新登录会更换 node key**:设备重新认证后 node key 随之变化。方式 A(同步)自动跟进,无感知;方式 B(手动)需要成员重新提交新 key 并更新 `whitelist.txt`,否则会被拒绝。
-- **准入接口无鉴权**:`/verify` 是明文 HTTP 且不带鉴权,只应部署在 derper 可达的私网/compose 网络内,切勿发布到公网。`docker-compose.yaml` 已默认将 8081 仅绑定到宿主机回环地址(`curl 127.0.0.1:8081/status` 可查看运行版本与各来源健康状态)。
 
 ## 环境变量
 

@@ -18,7 +18,7 @@ This project provides two Docker images for running a Tailscale DERP relay servi
 
 ```bash
 curl -O https://raw.githubusercontent.com/haukuen/derper/main/docker-compose.yaml
-curl -o whitelist.txt https://raw.githubusercontent.com/haukuen/derper/main/whitelist.example.txt
+touch whitelist.txt   # must exist before the first start, or Docker mounts it as a directory
 ```
 
 ### 2. Populate the allowlist (pick one of the two methods)
@@ -149,11 +149,6 @@ The recommended setup from deployment (see [Populate the allowlist](#2-populate-
 - When one source's sync fails, its **previous list stays in force** and the error is recorded (visible via `GET /status`) — an API outage neither admits strangers nor wipes the list.
 - If a member revokes their credential, syncing stops for that tailnet and the last synced list remains; switching to manual management is seamless.
 
-## Known limitations
-
-- **Admission is checked only at connection setup**: derper queries the admission controller once when a client opens a new connection. After a key is revoked, the device's **established connections persist until they drop naturally**; reconnects are rejected.
-- **Re-authentication rotates the node key**: when a device re-authenticates, its node key changes. Method A (sync) follows automatically and invisibly; with method B (manual) the member must submit the new key and update `whitelist.txt`, or be rejected.
-- **The admission endpoint is unauthenticated**: `/verify` is plain HTTP with no authentication and belongs on a private/compose network reachable by derper only — never publish it to the internet. `docker-compose.yaml` already binds 8081 to the host loopback only (`curl 127.0.0.1:8081/status` shows the running version and per-source health).
 
 ## Environment variables
 
